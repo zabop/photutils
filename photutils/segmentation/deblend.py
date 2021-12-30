@@ -14,12 +14,22 @@ from .detect import _make_binary_structure, _detect_sources
 from ..utils._convolution import _filter_data
 from ..utils.exceptions import NoDetectionsWarning
 
-__all__ = ['deblend_sources']
+__all__ = ["deblend_sources"]
 
 
-def deblend_sources(data, segment_img, npixels, kernel=None, labels=None,
-                    nlevels=32, contrast=0.001, mode='exponential',
-                    connectivity=8, relabel=True):
+def deblend_sources(
+    data,
+    segment_img,
+    npixels,
+    kernel=None,
+    labels=None,
+    nlevels=32,
+    contrast=0.001,
+    mode="exponential",
+    connectivity=8,
+    relabel=True,
+    progress_bar=False,
+):
     """
     Deblend overlapping sources labeled in a segmentation image.
 
@@ -103,8 +113,7 @@ def deblend_sources(data, segment_img, npixels, kernel=None, labels=None,
         segment_img = SegmentationImage(segment_img)
 
     if segment_img.shape != data.shape:
-        raise ValueError('The data and segmentation image must have '
-                         'the same shape')
+        raise ValueError("The data and segmentation image must have " "the same shape")
 
     if labels is None:
         labels = segment_img.labels
@@ -112,12 +121,20 @@ def deblend_sources(data, segment_img, npixels, kernel=None, labels=None,
     segment_img.check_labels(labels)
 
     if kernel is not None:
-        data = _filter_data(data, kernel, mode='constant', fill_value=0.0)
+        data = _filter_data(data, kernel, mode="constant", fill_value=0.0)
 
     last_label = segment_img.max_label
     segm_deblended = object.__new__(SegmentationImage)
     segm_deblended._data = np.copy(segment_img.data)
-    for label in labels:
+
+    if progress_bar:
+        from tqdm.notebook import tqdm
+
+        tqdm_if_requested = tqdm
+    else:
+        tqdm_if_requested = lambda x: x
+
+    for label in tqdm_if_requested(labels):
         source_slice = segment_img.slices[segment_img.get_index(label)]
         source_data = data[source_slice]
 
@@ -126,25 +143,35 @@ def deblend_sources(data, segment_img, npixels, kernel=None, labels=None,
 
         source_segm.keep_labels(label)  # include only one label
         source_deblended = _deblend_source(
-            source_data, source_segm, npixels, nlevels=nlevels,
-            contrast=contrast, mode=mode, connectivity=connectivity)
+            source_data,
+            source_segm,
+            npixels,
+            nlevels=nlevels,
+            contrast=contrast,
+            mode=mode,
+            connectivity=connectivity,
+        )
 
-        if not np.array_equal(source_deblended.data.astype(bool),
-                              source_segm.data.astype(bool)):
-            raise ValueError(f'Deblending failed for source "{label}".  '
-                             'Please ensure you used the same pixel '
-                             'connectivity in detect_sources and '
-                             'deblend_sources.  If this issue persists, '
-                             'then please inform the developers.')
+        if not np.array_equal(
+            source_deblended.data.astype(bool), source_segm.data.astype(bool)
+        ):
+            raise ValueError(
+                f'Deblending failed for source "{label}".  '
+                "Please ensure you used the same pixel "
+                "connectivity in detect_sources and "
+                "deblend_sources.  If this issue persists, "
+                "then please inform the developers."
+            )
 
         if source_deblended.nlabels > 1:
             source_deblended.relabel_consecutive(start_label=1)
 
             # replace the original source with the deblended source
-            source_mask = (source_deblended.data > 0)
+            source_mask = source_deblended.data > 0
             segm_tmp = segm_deblended.data
             segm_tmp[source_slice][source_mask] = (
-                source_deblended.data[source_mask] + last_label)
+                source_deblended.data[source_mask] + last_label
+            )
 
             segm_deblended.__dict__ = {}  # reset cached properties
             segm_deblended._data = segm_tmp
@@ -157,8 +184,15 @@ def deblend_sources(data, segment_img, npixels, kernel=None, labels=None,
     return segm_deblended
 
 
-def _deblend_source(data, segment_img, npixels, nlevels=32, contrast=0.001,
-                    mode='exponential', connectivity=8):
+def _deblend_source(
+    data,
+    segment_img,
+    npixels,
+    nlevels=32,
+    contrast=0.001,
+    mode="exponential",
+    connectivity=8,
+):
     """
     Deblend a single labeled source.
 
@@ -223,7 +257,7 @@ def _deblend_source(data, segment_img, npixels, nlevels=32, contrast=0.001,
     if contrast < 0 or contrast > 1:
         raise ValueError(f'contrast must be >= 0 and <= 1, got "{contrast}"')
 
-    segm_mask = (segment_img.data > 0)
+    segm_mask = segment_img.data > 0
     source_values = data[segm_mask]
     source_sum = float(np.nansum(source_values))
     source_min = np.nanmin(source_values)
@@ -231,32 +265,38 @@ def _deblend_source(data, segment_img, npixels, nlevels=32, contrast=0.001,
     if source_min == source_max:
         return segment_img  # no deblending
 
-    if mode == 'exponential' and source_min < 0:
-        warnings.warn(f'Source "{segment_img.labels[0]}" contains negative '
-                      'values, setting deblending mode to "linear"',
-                      AstropyUserWarning)
-        mode = 'linear'
+    if mode == "exponential" and source_min < 0:
+        warnings.warn(
+            f'Source "{segment_img.labels[0]}" contains negative '
+            'values, setting deblending mode to "linear"',
+            AstropyUserWarning,
+        )
+        mode = "linear"
 
-    steps = np.arange(1., nlevels + 1)
-    if mode == 'exponential':
+    steps = np.arange(1.0, nlevels + 1)
+    if mode == "exponential":
         if source_min == 0:
             source_min = source_max * 0.01
-        thresholds = source_min * ((source_max / source_min) **
-                                   (steps / (nlevels + 1)))
-    elif mode == 'linear':
-        thresholds = source_min + ((source_max - source_min) /
-                                   (nlevels + 1)) * steps
+        thresholds = source_min * ((source_max / source_min) ** (steps / (nlevels + 1)))
+    elif mode == "linear":
+        thresholds = source_min + ((source_max - source_min) / (nlevels + 1)) * steps
     else:
-        raise ValueError(f'"{mode}" is an invalid mode; mode must be '
-                         '"exponential" or "linear"')
+        raise ValueError(
+            f'"{mode}" is an invalid mode; mode must be ' '"exponential" or "linear"'
+        )
 
     # suppress NoDetectionsWarning during deblending
-    warnings.filterwarnings('ignore', category=NoDetectionsWarning)
+    warnings.filterwarnings("ignore", category=NoDetectionsWarning)
 
     mask = ~segm_mask
-    segments = _detect_sources(data, thresholds, npixels=npixels,
-                               connectivity=connectivity, mask=mask,
-                               deblend_skip=True)
+    segments = _detect_sources(
+        data,
+        thresholds,
+        npixels=npixels,
+        connectivity=connectivity,
+        mask=mask,
+        deblend_skip=True,
+    )
 
     selem = _make_binary_structure(data.ndim, connectivity)
 
@@ -274,7 +314,7 @@ def _deblend_source(data, segment_img, npixels, nlevels=32, contrast=0.001,
             # but keep any sources in the lower level that do not have
             # multiple children in the upper level
             for label in segments[i].labels:
-                mask = (segm_lower == label)
+                mask = segm_lower == label
                 # checks for 1-to-1 label mapping n -> m (where m >= 0)
                 upper_labels = segm_upper[mask]
                 upper_labels = np.unique(upper_labels[upper_labels != 0])
@@ -299,15 +339,17 @@ def _deblend_source(data, segment_img, npixels, nlevels=32, contrast=0.001,
             markers = watershed(-data, markers, mask=mask, connectivity=selem)
 
             labels = np.unique(markers[markers != 0])
-            flux_frac = np.array([np.sum(data[markers == label])
-                                  for label in labels]) / source_sum
+            flux_frac = (
+                np.array([np.sum(data[markers == label]) for label in labels])
+                / source_sum
+            )
             remove_marker = any(flux_frac < contrast)
 
             if remove_marker:
                 # remove only the faintest source (one at a time)
                 # because several faint sources could combine to meet the
                 # contrast criterion
-                markers[markers == labels[np.argmin(flux_frac)]] = 0.
+                markers[markers == labels[np.argmin(flux_frac)]] = 0.0
 
         segm_new = object.__new__(SegmentationImage)
         segm_new._data = markers
