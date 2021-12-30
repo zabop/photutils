@@ -28,7 +28,6 @@ def deblend_sources(
     mode="exponential",
     connectivity=8,
     relabel=True,
-    progress_bar=False,
 ):
     """
     Deblend overlapping sources labeled in a segmentation image.
@@ -127,14 +126,8 @@ def deblend_sources(
     segm_deblended = object.__new__(SegmentationImage)
     segm_deblended._data = np.copy(segment_img.data)
 
-    if progress_bar:
-        from tqdm.notebook import tqdm
-
-        tqdm_if_requested = tqdm
-    else:
-        tqdm_if_requested = lambda x: x
-
-    for label in tqdm_if_requested(labels):
+    from tqdm.notebook import tqdm
+    for label in tqdm(labels):
         source_slice = segment_img.slices[segment_img.get_index(label)]
         source_data = data[source_slice]
 
